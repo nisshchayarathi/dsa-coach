@@ -4,9 +4,14 @@ import { authOptions } from "@/lib/auth/auth";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 import { Pinecone } from "@pinecone-database/pinecone";
+import { GoogleGenAI } from "@google/genai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+interface ChatHistory {
+  role: string;
+  parts: any;
+}
+
+const ai = new GoogleGenAI({});
 
 const embeddings = new GoogleGenerativeAIEmbeddings({
   apiKey: process.env.GEMINI_API_KEY!,
@@ -55,10 +60,65 @@ export async function POST(req: Request) {
   try {
     const { question, history } = await req.json();
     console.log("📝 Question received:", question);
-    console.log("📚 History length:", history?.length || 0);
+    console.log("📚 History length:", history || 0);
+
+    const formattedHistory: ChatHistory[] = (history || []).filter(
+      (msg: any) =>
+        msg &&
+        msg.role &&
+        Array.isArray(msg.parts) &&
+        msg.parts.length > 0 &&
+        msg.parts[0].text
+    );
+
+    formattedHistory.push({
+      role: "user",
+      parts: [{ text: question }],
+    });
+
+    // Remove the first message if it's the initial bot greeting
+    if (formattedHistory.length > 0 && formattedHistory[0].role === "model") {
+      formattedHistory.shift();
+    }
+
+    ////////////////////
+    const userHistory = formattedHistory
+      .filter((msg) => msg.role === "user")
+      .map((msg) => msg.parts[0].text); // extract text
+
+    const followUpQuestion = userHistory.pop(); // last user input
+
+    console.log("🔮 Generating Enhanced Question...");
+    const enhancedQuestion = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: `Previous user messages:\n${userHistory.join(
+                "\n"
+              )}\nFollow-up question: ${followUpQuestion}`,
+            },
+          ],
+        },
+      ],
+      config: {
+        systemInstruction: `You are a query rewriting expert. Rephrase the Follow-up question into a standalone question. Only output the rewritten question, no explanations.`,
+      },
+    });
+
+    formattedHistory.pop();
+    formattedHistory.push({
+      role: "user",
+      parts: [{ text: enhancedQuestion.text || question }],
+    });
 
     // embed question
-    const queryVector = await embeddings.embedQuery(question);
+    console.log(enhancedQuestion.text);
+    const queryVector = await embeddings.embedQuery(
+      enhancedQuestion.text || "Could not generate question"
+    );
 
     // search Pinecone
     const searchResults = await pineconeIndex.query({
@@ -72,50 +132,60 @@ export async function POST(req: Request) {
       .filter((t) => t.trim().length > 0)
       .join("\n\n---\n\n");
 
-    const historyText = Array.isArray(history)
-      ? history.map((h: any) => `${h.sender}: ${h.text}`).join("\n")
-      : "";
     // system instruction
-    const systemInstruction = `You are AyurBot, a friendly expert in Ayurveda, yoga, and health.
-Here is the conversation so far:
-${historyText || "No previous history."}
-Context: ${context || "No specific context retrieved for this query."}`;
+    const systemInstruction = `You are a Data Structures and Algorithms expert AI assistant. 
+Answer all user questions in a **clear, concise, and chat-friendly way**. 
+
+Follow these rules for every response:
+
+1. Start with a short one-line definition or explanation.
+2. Break down key points using bullet points (2–5 bullets max).
+3. Avoid dense paragraphs; keep sentences short and readable.
+4. Use simple terms and examples where appropriate.
+5. If the user asks a follow-up, continue from the previous answer, 
+   assuming they already know what was explained before. Do not repeat the entire previous explanation.
+6. If the answer is not available in the provided context, respond with: 
+   "I cannot find any information about this related to DSA, please explain me again."
+
+Always make the response suitable for chat display.
+    Context: ${context}`;
+
+    console.log(
+      "🧩 formattedHistory:",
+      JSON.stringify(formattedHistory, null, 2)
+    );
 
     // generate response
     console.log("🔮 Generating AI response...");
-    const response = await withRetry(() =>
-      model.generateContent({
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: systemInstruction + "\n\nQuestion: " + question }],
-          },
-        ],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 500 },
-      })
-    );
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: formattedHistory,
+      config: {
+        systemInstruction,
+      },
+    });
 
     console.log("🎯 Raw AI response received:", response);
-    const answer = response.response.text();
-    console.log("✅ Successfully generated response, length:", answer.length);
-    console.log(
-      "📄 Response content preview:",
-      answer.substring(0, 100) + "..."
-    );
+    const answer = response.text;
 
     // If empty response, provide a fallback
     if (!answer || answer.trim().length === 0) {
       console.log("⚠️ Empty response detected, using fallback");
-      const fallbackAnswer =
-        "I understand you're asking about health concerns. For fever, it's important to rest, stay hydrated, and consult a healthcare professional if symptoms persist or worsen. Would you like some general wellness advice from Ayurvedic practices?";
+      const fallbackAnswer = "I understand you're asking about dsa.";
       return NextResponse.json({
         answer: fallbackAnswer,
         fallback: true,
       });
     }
 
+    console.log("✅ Successfully generated response, length:", answer.length);
+    console.log(
+      "📄 Response content preview:",
+      answer.substring(0, 100) + "..."
+    );
+
     return NextResponse.json({
-      answer: answer,
+      answer,
     });
   } catch (error: any) {
     console.error("❌ Chat API error:", error);

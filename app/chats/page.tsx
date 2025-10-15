@@ -19,9 +19,6 @@ export default async function ChatsPage() {
       <h1 className="text-2xl font-bold text-black dark:text-gray-100 mb-2">
         Welcome, {session.user?.name} 👋
       </h1>
-      <p className="text-gray-700 dark:text-gray-300 mb-4">
-        You are now logged in. Ask AyurBot anything about Ayurveda, yoga, or wellness!
-      </p>
         </div>
 
       {/* Logout button */}
