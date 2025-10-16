@@ -3,13 +3,19 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/auth";
 import client from "@/lib/db";
 
-export async function GET(req: Request, { params }: { params: { conversationId: string } }) {
+export async function GET(
+  req: Request,
+  { params }: { params: Record<string, string> } // ✅ fix here
+) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { conversationId } = params;
+  const conversationId = params.conversationId;
+  if (!conversationId) {
+    return NextResponse.json({ error: "Conversation ID is required" }, { status: 400 });
+  }
 
   const conversation = await client.conversation.findFirst({
     where: { id: conversationId, user: { email: session.user.email } },
