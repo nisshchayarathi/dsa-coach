@@ -104,7 +104,8 @@ export async function POST(req: Request) {
         },
       ],
       config: {
-        systemInstruction: `You are a query rewriting expert. Rephrase the Follow-up question into a standalone question. Only output the rewritten question, no explanations.`,
+        systemInstruction: `You are a query rewriting expert. Rephrase the Follow-up question into a standalone question. Only output the rewritten question, no explanations.
+        If it is a greeting like hi or hello or how can you help me keep the meaning same`,
       },
     });
 
@@ -136,6 +137,7 @@ export async function POST(req: Request) {
     const systemInstruction = `You have to behave like a Data Structure and Algorithm Expert.
     You will be given a context of relevant information and a user question.
     Your task is to answer the user's question based ONLY on the provided context.
+    If it is a greeting like hi or hello or how can you help me reply what all you can do in short 2-3 lines.
     If the answer is not in the context, you must say "I could not find the answer in the provided document.Are you sure this is related to dsa?"
     Keep your answers clear, concise, and educational.
     Context: ${context}`;

@@ -8,125 +8,143 @@ interface Message {
   sender: "bot" | "user";
   text: string;
   time?: string;
-  usedRAG?: boolean;
-  sourcesCount?: number;
 }
 
-// Helper to format AI text neatly
+interface Conversation {
+  id: string;
+  title: string;
+}
+
+interface ChatbotPageProps {
+  selectedConversation: Conversation;
+}
+
 function formatBotText(text: string) {
   if (!text) return [];
-  // Split by line breaks first
-  const lines = text
+  return text
     .split("\n")
     .map((line) => line.trim())
-    .filter(Boolean);
-
-  return lines.map((line) => {
-    // Detect markdown bullets (starts with * or -) or bold headings (**)
-    if (line.startsWith("*")) {
-      line = line.replace(/^\*\s*/, "• "); // replace * with bullet
-    }
-    line = line.replace(/\*\*/g, ""); // remove bold markers
-    return line;
-  });
+    .filter(Boolean)
+    .map((line) => (line.startsWith("*") ? "• " + line.slice(1) : line));
 }
 
-export default function ChatbotPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 1,
-      sender: "bot",
-      text: "Hello! I'm DsaBot, your AI assistant for teaching and answering all your dsa questions. How can I help you today?",
-      time: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    },
-  ]);
+export default function ChatbotPage({
+  selectedConversation,
+}: ChatbotPageProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Reset and fetch messages whenever conversation changes
+  useEffect(() => {
+    const fetchMessages = async () => {
+      try {
+        const res = await fetch(
+          `/api/v1/messages?conversationId=${selectedConversation.id}`
+        );
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setMessages(
+            data.map((msg: any) => ({
+              id: msg.id,
+              sender: msg.sender,
+              text: msg.text,
+              time: new Date(msg.createdAt).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            }))
+          );
+        } else {
+          setMessages([]);
+        }
+      } catch (err) {
+        console.error("Failed to fetch messages:", err);
+        setMessages([]);
+      }
+    };
+
+    fetchMessages();
+  }, [selectedConversation]);
+
+  // Scroll to bottom whenever messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
-
-    const newUserMsg: Message = {
-      id: Date.now(),
-      sender: "user",
-      text: input,
-      time: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    };
-    setMessages((prev) => [...prev, newUserMsg]);
-    setInput("");
-    setLoading(true);
-
-    const saveChatToDB = async (sender: "user" | "bot", text: string) => {
-      try {
-        await fetch("/api/v1/save-chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ sender, text }),
-        });
-      } catch (err) {
-        console.error("Failed to save chat:", err);
-      }
-    };
-
+  const saveChatToDB = async (sender: "user" | "bot", text: string) => {
     try {
-      const res = await fetch("/api/v1/chats", {
+      await fetch("/api/v1/save-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          question: input,
-          history: messages.map((msg) => ({
-            role: msg.sender === "user" ? "user" : "model",
-            parts: [{ text: msg.text }],
-          })),
+          sender,
+          text,
+          conversationId: selectedConversation.id,
         }),
       });
-
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
-      const data = await res.json();
-
-      const botMsg: Message = {
-        id: Date.now() + 1,
-        sender: "bot",
-        text: data.answer || "Sorry, I couldn't find an answer.",
-        usedRAG: data.usedRAG || false,
-        sourcesCount: data.sourcesCount || 0,
-      };
-
-      if (data.fallback) {
-        botMsg.text +=
-          "\n\n💡 Note: I'm running in fallback mode due to AI service issues.";
-      }
-
-      setMessages((prev) => [...prev, botMsg]);
-    } catch (error: any) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 2,
-          sender: "bot",
-          text: `⚠️ Error: ${error.message || "Something went wrong."}`,
-        },
-      ]);
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      console.error("Failed to save chat:", err);
     }
   };
 
+const handleSend = async () => {
+  if (!input.trim()) return;
+
+  const newUserMsg: Message = {
+    id: Date.now(),
+    sender: "user",
+    text: input,
+    time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+  };
+
+  const updatedMessages = [...messages, newUserMsg];
+  setMessages(updatedMessages);
+  setInput("");
+  setLoading(true);
+
+  try {
+    await saveChatToDB("user", newUserMsg.text);
+
+    const res = await fetch("/api/v1/chats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        question: input,
+        conversationId: selectedConversation.id,
+        history: updatedMessages.map((msg) => ({
+          role: msg.sender === "user" ? "user" : "model",
+          parts: [{ text: msg.text }],
+        })),
+      }),
+    });
+
+    const data = await res.json();
+
+    const botMsg: Message = {
+      id: Date.now() + 1,
+      sender: "bot",
+      text: data.answer || "Sorry, I couldn't find an answer.",
+    };
+
+    // Update messages immediately
+    setMessages((prev) => [...prev, botMsg]);
+    setLoading(false); // stop typing indicator right away
+
+    // Save bot message in background
+    saveChatToDB("bot", botMsg.text).catch(console.error);
+  } catch (err) {
+    console.error(err);
+    setLoading(false);
+  }
+};
+
+
   return (
-    <div className="flex flex-col h-[85vh] bg-gray-50 dark:bg-gray-800 rounded-lg shadow p-4 border dark:border-gray-700">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-800 rounded-lg shadow p-4 border dark:border-gray-700">
       <div className="flex-1 overflow-y-auto space-y-4 p-2 text-black dark:text-gray-100">
         {messages.map((msg) => (
           <div
@@ -140,11 +158,9 @@ export default function ChatbotPage() {
                 <div className="flex items-center gap-2 text-green-700 dark:text-green-400 font-medium mb-1">
                   <Bot size={14} /> DsaBot
                 </div>
-                <div className="text-gray-900 dark:text-gray-100">
+                <div>
                   {formatBotText(msg.text).map((line, idx) => (
-                    <p key={idx} className="mb-1">
-                      {line}
-                    </p>
+                    <p key={idx}>{line}</p>
                   ))}
                 </div>
               </div>
@@ -166,7 +182,7 @@ export default function ChatbotPage() {
       <div className="mt-3 flex gap-2">
         <input
           type="text"
-          placeholder="Ask about dsa..."
+          placeholder="Ask about DSA..."
           className="flex-1 border border-gray-300 dark:border-gray-600 rounded px-4 py-2 text-black dark:text-gray-100 bg-white dark:bg-gray-700 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent"
           value={input}
           onChange={(e) => setInput(e.target.value)}
