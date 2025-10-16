@@ -52,7 +52,7 @@ async function App() {
             </Link>
             <Link
               href={"/signup"}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all hover:shadow-lg"
+              className={`${session?"hidden":""} px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all hover:shadow-lg`}
             >
               Signup
             </Link>
