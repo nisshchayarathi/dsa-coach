@@ -14,9 +14,9 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/auth";
 
 
-const session = await getServerSession(authOptions);
 
-function App() {
+async function App() {
+  const session = await getServerSession(authOptions);
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       <nav className="fixed w-full bg-slate-900/80 backdrop-blur-md border-b border-slate-800 z-50">
