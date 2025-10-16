@@ -1,15 +1,15 @@
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/auth";
 import client from "@/lib/db";
 
-export async function GET(req: Request, event: { params: { conversationId: string } }) {
+export async function GET(req: NextRequest, context: { params: { conversationId: string } }) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const conversationId = event.params.conversationId;
+  const conversationId = context.params.conversationId;
   if (!conversationId) {
     return NextResponse.json({ error: "Conversation ID is required" }, { status: 400 });
   }
