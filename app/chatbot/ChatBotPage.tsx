@@ -67,7 +67,19 @@ export default function ChatbotPage() {
     setInput("");
     setLoading(true);
 
-    
+    const saveChatToDB = async (sender: "user" | "bot", text: string) => {
+      try {
+        await fetch("/api/v1/save-chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ sender, text }),
+        });
+      } catch (err) {
+        console.error("Failed to save chat:", err);
+      }
+    };
+
     try {
       const res = await fetch("/api/v1/chats", {
         method: "POST",
