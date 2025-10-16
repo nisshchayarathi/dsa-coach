@@ -6,7 +6,7 @@ import client from "@/lib/db"; // Prisma client
 // DELETE /api/v1/conversations/[id]
 export async function DELETE(
   req: Request,
-  { params }: { params: { id: string } } // ✅ destructure here
+  { params }: { params: Record<string, string> } // ✅ correct type
 ) {
   try {
     // 1️⃣ Check session
@@ -16,7 +16,10 @@ export async function DELETE(
     }
 
     // 2️⃣ Get conversationId
-    const conversationId = params.id; // ✅ no await
+    const conversationId = params.id;
+    if (!conversationId) {
+      return NextResponse.json({ error: "Conversation ID is required" }, { status: 400 });
+    }
 
     // 3️⃣ Find user
     const user = await client.user.findUnique({
