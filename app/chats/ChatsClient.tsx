@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import ChatbotPage from "../chatbot/ChatBotPage";
 import LogoutButton from "../signout/page";
+import { Trash2 } from "lucide-react";
 
 interface Conversation {
   id: string;
@@ -144,9 +145,9 @@ export default function ChatsClient({ sessionName }: ChatsClientProps) {
                       console.error("Failed to delete conversation", err);
                     }
                   }}
-                  className="text-red-500 px-2"
+                  className="p-2 bg-transparent rounded  transition-colors flex items-center justify-center"
                 >
-                  🗑️
+                  <Trash2 className="w-5 h-5 text-red-500 hover:text-red-600" />
                 </button>
               </div>
             ))
