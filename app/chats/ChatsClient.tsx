@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import ChatbotPage from "../chatbot/ChatBotPage";
-import LogoutButton from "../signout/page"; // adjust the path if needed
+import LogoutButton from "../signout/page"; // adjust path if needed
 
 interface Conversation {
   id: string;
@@ -19,7 +19,8 @@ export default function ChatsClient({ sessionName }: ChatsClientProps) {
   const [selectedConversation, setSelectedConversation] =
     useState<Conversation | null>(null);
   const [newTitle, setNewTitle] = useState("");
-  const [loadingConversations, setLoadingConversations] = useState(true); // new loading state
+  const [loadingConversations, setLoadingConversations] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const fetchConversations = async () => {
     setLoadingConversations(true);
@@ -31,9 +32,7 @@ export default function ChatsClient({ sessionName }: ChatsClientProps) {
         if (!selectedConversation && data.length > 0) {
           setSelectedConversation(data[0]);
         }
-      } else {
-        setConversations([]);
-      }
+      } else setConversations([]);
     } catch (err) {
       console.error("Failed to fetch conversations:", err);
       setConversations([]);
@@ -48,7 +47,6 @@ export default function ChatsClient({ sessionName }: ChatsClientProps) {
 
   const handleNewConversation = async () => {
     if (!newTitle.trim()) return;
-
     try {
       const res = await fetch("/api/v1/save-chat", {
         method: "POST",
@@ -60,34 +58,50 @@ export default function ChatsClient({ sessionName }: ChatsClientProps) {
           conversationTitle: newTitle,
         }),
       });
-
       const data = await res.json();
       if (!res.ok || !data.conversationId) {
         throw new Error(data.error || "Failed to create conversation");
       }
 
-      const title = newTitle.trim();
-      setNewTitle("");
       const newConv = {
         id: data.conversationId,
-        title,
+        title: newTitle.trim(),
         createdAt: new Date().toISOString(),
       };
+      setNewTitle("");
       setSelectedConversation(newConv);
       fetchConversations();
+      setSidebarOpen(false); // auto-close on mobile
     } catch (err) {
       console.error("Error creating conversation:", err);
     }
   };
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen relative">
       {/* Sidebar */}
-      <div className="w-64 bg-gray-100 dark:bg-gray-700 p-4 flex flex-col">
-        <h2 className="text-lg font-bold mb-4 text-gray-800 dark:text-gray-100">
-          Welcome, {sessionName}
-        </h2>
+      <div
+        className={`
+    fixed md:relative z-40 top-0 left-0 h-full bg-gray-100 dark:bg-gray-700 p-4 flex flex-col
+    w-64 transition-transform transform
+    ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0
+  `}
+      >
+        {/* Top row: Welcome + Cross button */}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">
+            Welcome, {sessionName}
+          </h2>
+          {/* Cross button for mobile */}
+          <button
+            className="md:hidden text-2xl font-bold text-gray-700 dark:text-gray-200"
+            onClick={() => setSidebarOpen(false)}
+          >
+            ×
+          </button>
+        </div>
 
+        {/* Conversation list */}
         <div className="flex flex-col gap-2 flex-1 overflow-y-auto">
           {loadingConversations ? (
             <p className="text-gray-500 dark:text-gray-300">
@@ -106,19 +120,21 @@ export default function ChatsClient({ sessionName }: ChatsClientProps) {
                       ? "bg-green-500 text-white"
                       : "hover:bg-green-200 dark:hover:bg-green-600"
                   }`}
-                  onClick={() => setSelectedConversation(conv)}
+                  onClick={() => {
+                    setSelectedConversation(conv);
+                    setSidebarOpen(false);
+                  }}
                 >
                   {conv.title || "Untitled"}
                 </button>
                 <button
                   onClick={async (e) => {
-                    e.stopPropagation(); // prevent selecting the conversation
+                    e.stopPropagation();
                     try {
                       await fetch(`/api/v1/conversations/${conv.id}`, {
                         method: "DELETE",
                         credentials: "include",
                       });
-                      // Remove from local state
                       setConversations((prev) =>
                         prev.filter((c) => c.id !== conv.id)
                       );
@@ -137,7 +153,8 @@ export default function ChatsClient({ sessionName }: ChatsClientProps) {
           )}
         </div>
 
-        <div className="flex flex-col gap-2">
+        {/* New conversation + logout */}
+        <div className="flex flex-col gap-2 mt-2">
           <input
             type="text"
             placeholder="New conversation title..."
@@ -151,13 +168,32 @@ export default function ChatsClient({ sessionName }: ChatsClientProps) {
           >
             Create
           </button>
-          {/* Logout button */}
           <LogoutButton />
         </div>
       </div>
 
+      {/* Overlay for mobile when sidebar is open */}
+
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black opacity-30 z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        ></div>
+      )}
+
       {/* Chat area */}
-      <div className="flex-1 p-4">
+      <div className="flex-1 p-4 md:ml-64">
+        {/* Hamburger button for mobile to open sidebar */}
+        
+        {!sidebarOpen && (
+          <button
+            className="fixed top-4 left-4 z-50 md:hidden p-2  text-white rounded-lg"
+            onClick={() => setSidebarOpen(true)}
+          >
+            ☰
+          </button>
+        )}
+
         {loadingConversations ? (
           <p className="text-gray-500 dark:text-gray-300">Loading chat...</p>
         ) : selectedConversation ? (
