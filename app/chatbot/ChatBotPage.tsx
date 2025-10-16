@@ -144,7 +144,7 @@ const handleSend = async () => {
 
 
   return (
-    <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-800 rounded-lg shadow p-4 border dark:border-gray-700">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-800 shadow p-4 border dark:border-gray-700">
       <div className="flex-1 overflow-y-auto space-y-4 p-2 text-black dark:text-gray-100">
         {messages.map((msg) => (
           <div
