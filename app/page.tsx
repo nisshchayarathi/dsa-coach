@@ -10,6 +10,11 @@ import {
   Trophy,
   Users,
 } from "lucide-react";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth/auth";
+
+
+const session = await getServerSession(authOptions);
 
 function App() {
   return (
@@ -20,30 +25,30 @@ function App() {
             <Bot className="w-8 h-8 text-blue-500" />
             <span className="text-2xl font-bold text-white">DSA Coach</span>
           </div>
-          <div className="hidden md:flex items-center gap-8">
+          <div className="flex items-center gap-8">
             <a
               href="#features"
-              className="text-slate-300 hover:text-white transition-colors"
+              className="hidden md:flex text-slate-300 hover:text-white transition-colors"
             >
               Features
             </a>
             <a
               href="#how-it-works"
-              className="text-slate-300 hover:text-white transition-colors"
+              className="hidden md:flex text-slate-300 hover:text-white transition-colors"
             >
               How It Works
             </a>
             <a
               href="#pricing"
-              className="text-slate-300 hover:text-white transition-colors"
+              className="hidden md:flex text-slate-300 hover:text-white transition-colors"
             >
               Pricing
             </a>
             <Link
-              href={"/signin"}
+              href={session?"/chats":"/signin"}
               className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all hover:shadow-lg"
             >
-              Signin
+              {session?"Chat Now":"Signin"}
             </Link>
             <Link
               href={"/signup"}
@@ -74,13 +79,10 @@ function App() {
               guidance to ace your coding interviews.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <button className="group px-8 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all hover:shadow-xl hover:shadow-blue-500/25 text-lg font-semibold flex items-center justify-center gap-2">
+              <a href={session ? "/chats" : "/signin"} className="group px-8 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all hover:shadow-xl hover:shadow-blue-500/25 text-lg font-semibold flex items-center justify-center gap-2">
                 Start Learning Free
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </button>
-              <button className="px-8 py-4 bg-slate-800 text-slate-200 rounded-xl hover:bg-slate-700 transition-all border-2 border-slate-700 text-lg font-semibold">
-                Watch Demo
-              </button>
+              </a>
             </div>
             <div className="flex items-center justify-center gap-8 mt-12 text-sm text-slate-400">
               <div className="flex items-center gap-2">
