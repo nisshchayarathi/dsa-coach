@@ -67,6 +67,7 @@ export default function ChatbotPage() {
     setInput("");
     setLoading(true);
 
+    
     try {
       const res = await fetch("/api/v1/chats", {
         method: "POST",

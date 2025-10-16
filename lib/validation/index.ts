@@ -11,6 +11,3 @@ export const SigninSchema = z.object({
     password: z.string(),
 })
 
-export const CreateRoomSchema = z.object({
-    name: z.string(),
-})
