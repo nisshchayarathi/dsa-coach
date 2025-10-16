@@ -6,7 +6,7 @@ import client from "@/lib/db"; // Prisma client
 // DELETE /api/v1/conversations/[id]
 export async function DELETE(
   req: Request,
-  { params }: { params: Record<string, string> } // ✅ correct type
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // 1️⃣ Check session
@@ -16,16 +16,20 @@ export async function DELETE(
     }
 
     // 2️⃣ Get conversationId
-    const conversationId = params.id;
+    const { id: conversationId } = await params;
     if (!conversationId) {
-      return NextResponse.json({ error: "Conversation ID is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Conversation ID is required" },
+        { status: 400 }
+      );
     }
 
     // 3️⃣ Find user
     const user = await client.user.findUnique({
       where: { email: session.user.email },
     });
-    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (!user)
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
 
     // 4️⃣ Ensure this conversation belongs to the user
     const conversation = await client.conversation.findUnique({

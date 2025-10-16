@@ -4,16 +4,22 @@ import { authOptions } from "@/lib/auth/auth";
 import client from "@/lib/db";
 
 // [conversationId] dynamic GET
-export async function GET(req: Request, context: any) {
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ conversationId: string }> }
+) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // ⚠️ Access dynamic route param via context.params
-  const conversationId = context?.params?.conversationId;
+  // Access dynamic route param via params
+  const { conversationId } = await params;
   if (!conversationId) {
-    return NextResponse.json({ error: "Conversation ID is required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Conversation ID is required" },
+      { status: 400 }
+    );
   }
 
   const conversation = await client.conversation.findFirst({
@@ -22,7 +28,10 @@ export async function GET(req: Request, context: any) {
   });
 
   if (!conversation) {
-    return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Conversation not found" },
+      { status: 404 }
+    );
   }
 
   return NextResponse.json(conversation.chats);
