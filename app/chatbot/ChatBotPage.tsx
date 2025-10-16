@@ -90,58 +90,59 @@ export default function ChatbotPage({
     }
   };
 
-const handleSend = async () => {
-  if (!input.trim()) return;
+  const handleSend = async () => {
+    if (!input.trim() || loading) return; // <-- prevent sending while loading
 
-  const newUserMsg: Message = {
-    id: Date.now(),
-    sender: "user",
-    text: input,
-    time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-  };
+    // Capture input value and immediately set loading to prevent race conditions
+    const userInput = input.trim();
+    setLoading(true);
+    setInput("");
 
-  const updatedMessages = [...messages, newUserMsg];
-  setMessages(updatedMessages);
-  setInput("");
-  setLoading(true);
-
-  try {
-    await saveChatToDB("user", newUserMsg.text);
-
-    const res = await fetch("/api/v1/chats", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({
-        question: input,
-        conversationId: selectedConversation.id,
-        history: updatedMessages.map((msg) => ({
-          role: msg.sender === "user" ? "user" : "model",
-          parts: [{ text: msg.text }],
-        })),
+    const newUserMsg: Message = {
+      id: Date.now(),
+      sender: "user",
+      text: userInput,
+      time: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
       }),
-    });
-
-    const data = await res.json();
-
-    const botMsg: Message = {
-      id: Date.now() + 1,
-      sender: "bot",
-      text: data.answer || "Sorry, I couldn't find an answer.",
     };
 
-    // Update messages immediately
-    setMessages((prev) => [...prev, botMsg]);
-    setLoading(false); // stop typing indicator right away
+    const updatedMessages = [...messages, newUserMsg];
+    setMessages(updatedMessages);
 
-    // Save bot message in background
-    saveChatToDB("bot", botMsg.text).catch(console.error);
-  } catch (err) {
-    console.error(err);
-    setLoading(false);
-  }
-};
+    try {
+      await saveChatToDB("user", newUserMsg.text);
 
+      const res = await fetch("/api/v1/chats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          question: userInput,
+          conversationId: selectedConversation.id,
+          history: updatedMessages.map((msg) => ({
+            role: msg.sender === "user" ? "user" : "model",
+            parts: [{ text: msg.text }],
+          })),
+        }),
+      });
+
+      const data = await res.json();
+
+      const botMsg: Message = {
+        id: Date.now() + 1,
+        sender: "bot",
+        text: data.answer || "Sorry, I couldn't find an answer.",
+      };
+
+      setMessages((prev) => [...prev, botMsg]);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false); // always reset loading
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-800 shadow p-4 border dark:border-gray-700">
@@ -186,8 +187,16 @@ const handleSend = async () => {
           className="flex-1 border border-gray-300 dark:border-gray-600 rounded px-4 py-2 text-black dark:text-gray-100 bg-white dark:bg-gray-700 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSend()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !loading) {
+              e.preventDefault();
+              handleSend();
+            } else if (e.key === "Enter" && loading) {
+              e.preventDefault(); // prevent submission while bot is responding
+            }
+          }}
         />
+
         <button
           onClick={handleSend}
           className="bg-green-600 dark:bg-green-500 hover:bg-green-700 dark:hover:bg-green-600 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
