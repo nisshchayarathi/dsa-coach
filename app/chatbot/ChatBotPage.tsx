@@ -25,7 +25,19 @@ function formatBotText(text: string) {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => (line.startsWith("*") ? "• " + line.slice(1) : line));
+    .map((line) => {
+      // Remove markdown symbols like **bold**, *italic*, etc.
+      line = line.replace(/\*\*(.*?)\*\*/g, "$1"); // remove **bold**
+      line = line.replace(/\*(.*?)\*/g, "$1"); // remove *italic*
+      line = line.replace(/__(.*?)__/g, "$1"); // remove __underline__
+      line = line.replace(/_(.*?)_/g, "$1"); // remove _italic_
+      line = line.replace(/`(.*?)`/g, "$1"); // remove inline code
+      line = line.replace(/^#+\s?(.*)/, "$1"); // remove markdown headers
+
+      // Handle bullets properly
+      if (line.startsWith("*")) return "• " + line.slice(1).trim();
+      return line;
+    });
 }
 
 export default function ChatbotPage({
@@ -137,6 +149,7 @@ export default function ChatbotPage({
       };
 
       setMessages((prev) => [...prev, botMsg]);
+      await saveChatToDB("bot", botMsg.text);
     } catch (err) {
       console.error(err);
     } finally {
