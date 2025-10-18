@@ -62,32 +62,29 @@ export async function POST(req: Request) {
     console.log("📝 Question received:", question);
     console.log("📚 History length:", history || 0);
 
-    const formattedHistory: ChatHistory[] = (history || []).filter(
-      (msg: any) =>
-        msg &&
-        msg.role &&
-        Array.isArray(msg.parts) &&
-        msg.parts.length > 0 &&
-        msg.parts[0].text
-    );
+    // 1️⃣ Filter and format history from front-end
+    const formattedHistory: ChatHistory[] = (history || [])
+      .filter(
+        (msg: any) =>
+          msg &&
+          msg.role &&
+          Array.isArray(msg.parts) &&
+          msg.parts.length > 0 &&
+          msg.parts[0].text
+      )
+      .map((msg: any) => ({
+        role: msg.role,
+        parts: [{ text: msg.parts[0].text }],
+      }));
 
-    formattedHistory.push({
-      role: "user",
-      parts: [{ text: question }],
-    });
-
-    // Remove the first message if it's the initial bot greeting
-    if (formattedHistory.length > 0 && formattedHistory[0].role === "model") {
-      formattedHistory.shift();
-    }
-
-    ////////////////////
+    // 2️⃣ Extract previous user messages
     const userHistory = formattedHistory
       .filter((msg) => msg.role === "user")
-      .map((msg) => msg.parts[0].text); // extract text
+      .map((msg) => msg.parts[0].text);
 
-    const followUpQuestion = userHistory.pop(); // last user input
+    const followUpQuestion = question; // current question from front-end
 
+    // 3️⃣ Generate enhanced question
     console.log("🔮 Generating Enhanced Question...");
     const enhancedQuestion = await ai.models.generateContent({
       model: "gemini-2.5-flash",
@@ -105,23 +102,37 @@ export async function POST(req: Request) {
       ],
       config: {
         systemInstruction: `You are a query rewriting expert. Rephrase the Follow-up question into a standalone question. Only output the rewritten question, no explanations.
-        If it is a greeting like hi or hello or how can you help me keep the meaning same`,
+    If it is a greeting like hi or hello or how can you help me, keep the meaning same.`,
       },
     });
 
-    formattedHistory.pop();
-    formattedHistory.push({
-      role: "user",
-      parts: [{ text: enhancedQuestion.text || question }],
-    });
+    // 4️⃣ Log enhanced question
+    console.log("✨ Enhanced Question:", enhancedQuestion.text);
 
-    // embed question
-    console.log(enhancedQuestion.text);
+    // Remove the last user message
+    if (
+      formattedHistory.length > 0 &&
+      formattedHistory[formattedHistory.length - 1].role === "user"
+    ) {
+      formattedHistory.pop();
+    }
+    {
+      // Add system message or placeholder to avoid empty array
+      formattedHistory.push({
+        role: "user",
+        parts: [{ text: enhancedQuestion.text }],
+      });
+    }
+    console.log(
+      "📜 Final History sent to model:",
+      JSON.stringify(formattedHistory, null, 2)
+    );
+
+    // 6️⃣ Proceed with embeddings, Pinecone search, system instruction, and model response
     const queryVector = await embeddings.embedQuery(
       enhancedQuestion.text || "Could not generate question"
     );
 
-    // search Pinecone
     const searchResults = await pineconeIndex.query({
       topK: 10,
       vector: queryVector,
@@ -129,56 +140,28 @@ export async function POST(req: Request) {
     });
 
     const context = searchResults.matches
-      .map((m) => String(m.metadata?.text ?? "")) // safe string
+      .map((m) => String(m.metadata?.text ?? ""))
       .filter((t) => t.trim().length > 0)
       .join("\n\n---\n\n");
 
-    // system instruction
     const systemInstruction = `You have to behave like a Data Structure and Algorithm Expert.
-    You will be given a context of relevant information and a user question.
-    Your task is to answer the user's question based ONLY on the provided context.
-    If it is a greeting like hi or hello or how can you help me reply what all you can do in short 2-3 lines.
-    If the answer is not in the context, you must say "I could not find the answer in the provided document.Are you sure this is related to dsa?"
-    Keep your answers clear, concise, and educational.
-    Context: ${context}`;
+You will be given a context of relevant information and a user question.
+Your task is to answer the user's question based ONLY on the provided context.
+If it is a greeting like hi or hello or how can you help me reply what all you can do in short 2-3 lines.
+If the answer is not in the context, you must say "I could not find the answer in the provided document.Are you sure this is related to dsa?"
+Keep your answers clear, concise, and educational.
+Context: ${context}`;
 
-    console.log(
-      "🧩 formattedHistory:",
-      JSON.stringify(formattedHistory, null, 2)
-    );
-
-    // generate response
-    console.log("🔮 Generating AI response...");
+    // Generate AI response
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: formattedHistory,
-      config: {
-        systemInstruction,
-      },
+      config: { systemInstruction },
     });
 
-    console.log("🎯 Raw AI response received:", response);
-    const answer = response.text;
+    const answer = response.text || "I understand you're asking about DSA.";
 
-    // If empty response, provide a fallback
-    if (!answer || answer.trim().length === 0) {
-      console.log("⚠️ Empty response detected, using fallback");
-      const fallbackAnswer = "I understand you're asking about dsa.";
-      return NextResponse.json({
-        answer: fallbackAnswer,
-        fallback: true,
-      });
-    }
-
-    console.log("✅ Successfully generated response, length:", answer.length);
-    console.log(
-      "📄 Response content preview:",
-      answer.substring(0, 100) + "..."
-    );
-
-    return NextResponse.json({
-      answer,
-    });
+    return NextResponse.json({ answer });
   } catch (error: any) {
     console.error("❌ Chat API error:", error);
     console.error("Error details:", error.message, error.status);

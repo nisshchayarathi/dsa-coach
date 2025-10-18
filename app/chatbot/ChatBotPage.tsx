@@ -103,9 +103,8 @@ export default function ChatbotPage({
   };
 
   const handleSend = async () => {
-    if (!input.trim() || loading) return; // <-- prevent sending while loading
+    if (!input.trim() || loading) return;
 
-    // Capture input value and immediately set loading to prevent race conditions
     const userInput = input.trim();
     setLoading(true);
     setInput("");
@@ -120,12 +119,13 @@ export default function ChatbotPage({
       }),
     };
 
-    const updatedMessages = [...messages, newUserMsg];
-    setMessages(updatedMessages);
+    setMessages((prev) => [...prev, newUserMsg]);
 
     try {
+      // Save user message first
       await saveChatToDB("user", newUserMsg.text);
 
+      // Get bot response
       const res = await fetch("/api/v1/chats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -133,7 +133,7 @@ export default function ChatbotPage({
         body: JSON.stringify({
           question: userInput,
           conversationId: selectedConversation.id,
-          history: updatedMessages.map((msg) => ({
+          history: [...messages, newUserMsg].map((msg) => ({
             role: msg.sender === "user" ? "user" : "model",
             parts: [{ text: msg.text }],
           })),
@@ -146,14 +146,24 @@ export default function ChatbotPage({
         id: Date.now() + 1,
         sender: "bot",
         text: data.answer || "Sorry, I couldn't find an answer.",
+        time: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
       };
 
+      // Add bot message immediately
       setMessages((prev) => [...prev, botMsg]);
-      await saveChatToDB("bot", botMsg.text);
+
+      // Save bot message to DB asynchronously but don't block UI
+      saveChatToDB("bot", botMsg.text).catch((err) =>
+        console.error("Failed to save bot message:", err)
+      );
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false); // always reset loading
+      // Always stop loading
+      setLoading(false);
     }
   };
 
