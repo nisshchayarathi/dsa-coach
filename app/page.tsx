@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/auth";
-
+import LogoutButton from "./signout/page";
 
 
 async function App() {
@@ -56,6 +56,7 @@ async function App() {
             >
               Signup
             </Link>
+            {session ? <LogoutButton/> : ""}
           </div>
         </div>
       </nav>
