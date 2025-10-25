@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, KeyboardEvent } from "react";
 import { Bot, Send } from "lucide-react";
 
 interface Message {
@@ -26,35 +26,31 @@ function formatBotText(text: string) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      // Remove markdown symbols like **bold**, *italic*, etc.
-      line = line.replace(/\*\*(.*?)\*\*/g, "$1"); // remove **bold**
-      line = line.replace(/\*(.*?)\*/g, "$1"); // remove *italic*
-      line = line.replace(/__(.*?)__/g, "$1"); // remove __underline__
-      line = line.replace(/_(.*?)_/g, "$1"); // remove _italic_
-      line = line.replace(/`(.*?)`/g, "$1"); // remove inline code
-      line = line.replace(/^#+\s?(.*)/, "$1"); // remove markdown headers
+      // Remove markdown symbols
+      line = line.replace(/\*\*(.*?)\*\*/g, "$1"); // bold
+      line = line.replace(/\*(.*?)\*/g, "$1"); // italic
+      line = line.replace(/__(.*?)__/g, "$1"); // underline
+      line = line.replace(/_(.*?)_/g, "$1"); // italic
+      line = line.replace(/`(.*?)`/g, "$1"); // inline code
+      line = line.replace(/^#+\s?(.*)/, "$1"); // headers
 
-      // Handle bullets properly
+      // Handle bullets
       if (line.startsWith("*")) return "• " + line.slice(1).trim();
       return line;
     });
 }
 
-export default function ChatbotPage({
-  selectedConversation,
-}: ChatbotPageProps) {
+export default function ChatbotPage({ selectedConversation }: ChatbotPageProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Reset and fetch messages whenever conversation changes
+  // Fetch messages on conversation change
   useEffect(() => {
     const fetchMessages = async () => {
       try {
-        const res = await fetch(
-          `/api/v1/messages?conversationId=${selectedConversation.id}`
-        );
+        const res = await fetch(`/api/v1/messages?conversationId=${selectedConversation.id}`);
         const data = await res.json();
         if (Array.isArray(data)) {
           setMessages(
@@ -76,7 +72,6 @@ export default function ChatbotPage({
         setMessages([]);
       }
     };
-
     fetchMessages();
   }, [selectedConversation]);
 
@@ -105,65 +100,71 @@ export default function ChatbotPage({
   const handleSend = async () => {
     if (!input.trim() || loading) return;
 
-    const userInput = input.trim();
-    setLoading(true);
+    const userText = input.trim();
     setInput("");
+    setLoading(true);
 
-    const newUserMsg: Message = {
+    const userMsg: Message = {
       id: Date.now(),
       sender: "user",
-      text: userInput,
-      time: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      text: userText,
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
-
-    setMessages((prev) => [...prev, newUserMsg]);
+    setMessages((prev) => [...prev, userMsg]);
+    await saveChatToDB("user", userText);
 
     try {
-      // Save user message first
-      await saveChatToDB("user", newUserMsg.text);
-
-      // Get bot response
+      // Start streaming bot response
       const res = await fetch("/api/v1/chats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          question: userInput,
+          question: userText,
           conversationId: selectedConversation.id,
-          history: [...messages, newUserMsg].map((msg) => ({
+          history: [...messages, userMsg].map((msg) => ({
             role: msg.sender === "user" ? "user" : "model",
             parts: [{ text: msg.text }],
           })),
         }),
       });
 
-      const data = await res.json();
+      if (!res.body) throw new Error("No response body");
 
-      const botMsg: Message = {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let botMsg: Message = {
         id: Date.now() + 1,
         sender: "bot",
-        text: data.answer || "Sorry, I couldn't find an answer.",
-        time: new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
+        text: "",
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
 
-      // Add bot message immediately
-      setMessages((prev) => [...prev, botMsg]);
+      setMessages((prev) => [...prev, botMsg]); // add empty bot message
 
-      // Save bot message to DB asynchronously but don't block UI
-      saveChatToDB("bot", botMsg.text).catch((err) =>
-        console.error("Failed to save bot message:", err)
-      );
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        botMsg.text += chunk;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === botMsg.id ? botMsg : m))
+        );
+      }
+
+      // Save full bot message
+      saveChatToDB("bot", botMsg.text).catch(console.error);
     } catch (err) {
       console.error(err);
     } finally {
-      // Always stop loading
       setLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (!loading) handleSend();
     }
   };
 
@@ -173,20 +174,16 @@ export default function ChatbotPage({
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={`flex ${
-              msg.sender === "user" ? "justify-end" : "justify-start"
-            }`}
+            className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
           >
             {msg.sender === "bot" ? (
               <div className="bg-white dark:bg-gray-700 shadow p-3 rounded-lg max-w-[70%] text-sm border dark:border-gray-600">
                 <div className="flex items-center gap-2 text-green-700 dark:text-green-400 font-medium mb-1">
                   <Bot size={14} /> DsaBot
                 </div>
-                <div>
-                  {formatBotText(msg.text).map((line, idx) => (
-                    <p key={idx}>{line}</p>
-                  ))}
-                </div>
+                {formatBotText(msg.text).map((line, idx) => (
+                  <p key={idx}>{line}</p>
+                ))}
               </div>
             ) : (
               <div className="bg-green-600 dark:bg-green-500 text-white p-3 rounded-lg max-w-[70%] text-sm">
@@ -196,9 +193,7 @@ export default function ChatbotPage({
           </div>
         ))}
         {loading && (
-          <p className="text-gray-400 dark:text-gray-500 text-sm">
-            DsaBot is typing...
-          </p>
+          <p className="text-gray-400 dark:text-gray-500 text-sm">DsaBot is typing...</p>
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -210,16 +205,8 @@ export default function ChatbotPage({
           className="flex-1 border border-gray-300 dark:border-gray-600 rounded px-4 py-2 text-black dark:text-gray-100 bg-white dark:bg-gray-700 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !loading) {
-              e.preventDefault();
-              handleSend();
-            } else if (e.key === "Enter" && loading) {
-              e.preventDefault(); // prevent submission while bot is responding
-            }
-          }}
+          onKeyDown={handleKeyDown}
         />
-
         <button
           onClick={handleSend}
           className="bg-green-600 dark:bg-green-500 hover:bg-green-700 dark:hover:bg-green-600 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50"

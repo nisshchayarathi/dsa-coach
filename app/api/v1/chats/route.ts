@@ -1,17 +1,18 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/auth";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 import { Pinecone } from "@pinecone-database/pinecone";
-import { GoogleGenAI } from "@google/genai";
 
 interface ChatHistory {
   role: string;
   parts: any;
 }
 
-const ai = new GoogleGenAI({});
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY!,
+});
 
 const embeddings = new GoogleGenerativeAIEmbeddings({
   apiKey: process.env.GEMINI_API_KEY!,
@@ -23,7 +24,7 @@ const pinecone = new Pinecone({
 });
 const pineconeIndex = pinecone.Index(process.env.PINECONE_INDEX_NAME!);
 
-// helper
+// Retry helper
 async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries = 3,
@@ -42,27 +43,22 @@ async function withRetry<T>(
       }
     }
   }
-  throw new Error("Max retries reached without success"); // ✅ ensures return
+  throw new Error("Max retries reached without success");
 }
 
 export async function POST(req: Request) {
   console.log("🤖 Chat API called");
 
-  // Check session (but don't block if no session - allow anonymous usage)
   const session = await getServerSession(authOptions);
   console.log(
-    "👤 Session status:",
-    session
-      ? `Logged in as ${session.user?.email} (${(session.user as any)?.role})`
-      : "No session (anonymous)"
+    "👤 Session:",
+    session ? `Logged in as ${session.user?.email}` : "No session (anonymous)"
   );
 
   try {
     const { question, history } = await req.json();
-    console.log("📝 Question received:", question);
-    console.log("📚 History length:", history || 0);
 
-    // 1️⃣ Filter and format history from front-end
+    // 1️⃣ Filter and format history
     const formattedHistory: ChatHistory[] = (history || [])
       .filter(
         (msg: any) =>
@@ -82,57 +78,52 @@ export async function POST(req: Request) {
       .filter((msg) => msg.role === "user")
       .map((msg) => msg.parts[0].text);
 
-    const followUpQuestion = question; // current question from front-end
-
     // 3️⃣ Generate enhanced question
-    console.log("🔮 Generating Enhanced Question...");
-    const enhancedQuestion = await ai.models.generateContent({
+    const enhancedQuestionResp = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [
+        {
+          role: "model",
+          parts: [
+            {
+              text: `You are a query rewriting expert. 
+Rephrase the follow-up question into a standalone question. 
+Only output the rewritten question, no explanations. 
+If it is a greeting like hi, hello, or how can you help me, keep the meaning the same.`,
+            },
+          ],
+        },
         {
           role: "user",
           parts: [
             {
               text: `Previous user messages:\n${userHistory.join(
                 "\n"
-              )}\nFollow-up question: ${followUpQuestion}`,
+              )}\nFollow-up question: ${question}`,
             },
           ],
         },
       ],
-      config: {
-        systemInstruction: `You are a query rewriting expert. Rephrase the Follow-up question into a standalone question. Only output the rewritten question, no explanations.
-    If it is a greeting like hi or hello or how can you help me, keep the meaning same.`,
-      },
     });
 
-    // 4️⃣ Log enhanced question
-    console.log("✨ Enhanced Question:", enhancedQuestion.text);
+    const enhancedQuestion = enhancedQuestionResp.text;
+    console.log("✨ Enhanced Question:", enhancedQuestion);
 
-    // Remove the last user message
+    // 4️⃣ Update chat history
     if (
       formattedHistory.length > 0 &&
       formattedHistory[formattedHistory.length - 1].role === "user"
     ) {
       formattedHistory.pop();
     }
-    {
-      // Add system message or placeholder to avoid empty array
-      formattedHistory.push({
-        role: "user",
-        parts: [{ text: enhancedQuestion.text }],
-      });
-    }
-    console.log(
-      "📜 Final History sent to model:",
-      JSON.stringify(formattedHistory, null, 2)
-    );
+    formattedHistory.push({
+      role: "user",
+      parts: [{ text: enhancedQuestion }],
+    });
 
-    // 6️⃣ Proceed with embeddings, Pinecone search, system instruction, and model response
-    const queryVector = await embeddings.embedQuery(
-      enhancedQuestion.text || "Could not generate question"
-    );
-
+    // 5️⃣ Pinecone vector search
+    if (!enhancedQuestion) return;
+    const queryVector = await embeddings.embedQuery(enhancedQuestion);
     const searchResults = await pineconeIndex.query({
       topK: 10,
       vector: queryVector,
@@ -140,63 +131,49 @@ export async function POST(req: Request) {
     });
 
     const context = searchResults.matches
-      .map((m) => String(m.metadata?.text ?? ""))
+      .map((m) => String(m.metadata?.text ?? "")) // cast to string
       .filter((t) => t.trim().length > 0)
       .join("\n\n---\n\n");
 
-    const systemInstruction = `You have to behave like a Data Structure and Algorithm Expert.
-You will be given a context of relevant information and a user question.
-Your task is to answer the user's question based ONLY on the provided context.
-If it is a greeting like hi or hello or how can you help me reply what all you can do in short 2-3 lines.
-If the answer is not in the context, you must say "I could not find the answer in the provided document.Are you sure this is related to dsa?"
-Keep your answers clear, concise, and educational.
-Context: ${context}`;
-
-    // Generate AI response
-    const response = await ai.models.generateContent({
+    // 6️⃣ AI response streaming
+    const stream = await ai.models.generateContentStream({
       model: "gemini-2.5-flash",
-      contents: formattedHistory,
-      config: { systemInstruction },
+      contents: [
+        {
+          role: "model",
+          parts: [
+            {
+              text: `You are a Data Structures & Algorithms expert.
+Answer ONLY from the provided context.
+If the answer is not in the context, reply: "I could not find the answer in the provided document. Are you sure this is related to DSA?"
+Context:
+${context}`,
+            },
+          ],
+        },
+        ...formattedHistory,
+      ],
     });
 
-    const answer = response.text || "I understand you're asking about DSA.";
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        for await (const chunk of stream) {
+          if (!chunk) continue; // skip undefined chunks
+          const text = chunk.text; // safely call text()
+          if (text) controller.enqueue(encoder.encode(text));
+        }
+        controller.close();
+      },
+    });
 
-    return NextResponse.json({ answer });
+    return new Response(readable, {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
   } catch (error: any) {
     console.error("❌ Chat API error:", error);
-    console.error("Error details:", error.message, error.status);
-    console.error("Full error object:", JSON.stringify(error, null, 2));
-
-    // Check if it's an API key or service issue
-    if (error.message?.includes("API key") || error.status === 403) {
-      console.error("🔑 API Key issue detected");
-      return NextResponse.json(
-        {
-          error: "Configuration issue with AI service",
-          details: "API key problem",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (error.message?.includes("quota") || error.status === 429) {
-      console.error("📊 Quota exceeded");
-      return NextResponse.json(
-        {
-          error: "Service temporarily unavailable due to quota limits",
-          details: "Try again later",
-        },
-        { status: 503 }
-      );
-    }
-
-    // Return more detailed error information
     return NextResponse.json(
-      {
-        error: "Chat service temporarily unavailable",
-        details: error.message || "Unknown error",
-        errorType: error.constructor.name,
-      },
+      { error: error.message || "Unknown error" },
       { status: 500 }
     );
   }
